@@ -259,20 +259,6 @@
         "#news"
       ]
     },
-    "ethereum-comments": {
-      "feed": "http://blog.ethereum.org/comments/feed",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "ethereum": {
-      "feed": "http://blog.ethereum.org/feed",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
     "europa_ric": {
       "feed": "http://ec.europa.eu/research/infocentre/rss/infocentre-rss.xml",
       "delay": 300,
@@ -280,22 +266,8 @@
         "#news"
       ]
     },
-    "eu_survei": {
-      "feed": "http://www.eurosurveillance.org/public/RSSFeed/RSS.aspx",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
     "exploitdb": {
       "feed": "http://www.exploit-db.com/rss.xml",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "fars": {
-      "feed": "http://www.farsnews.com/rss.php",
       "delay": 300,
       "extraChannels": [
         "#news"
@@ -317,13 +289,6 @@
     },
     "faz_wirtschaft": {
       "feed": "http://www.faz.net/rss/aktuell/wirtschaft/",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "fbi": {
-      "feed": "https://www.fbi.gov/news/rss.xml",
       "delay": 300,
       "extraChannels": [
         "#news"
@@ -366,20 +331,6 @@
     },
     "geheimorganisation": {
       "feed": "http://geheimorganisation.org/feed/",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "GerForPol": {
-      "feed": "http://www.german-foreign-policy.com/de/news/rss-2.0",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "gmanet": {
-      "feed": "http://www.gmanetwork.com/news/rss/news",
       "delay": 300,
       "extraChannels": [
         "#news"
@@ -455,13 +406,6 @@
         "#news"
       ]
     },
-    "independent": {
-      "feed": "http://www.independent.com/rss/headlines/",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
     "info_libera": {
       "feed": "http://www.informationliberation.com/rss.xml",
       "delay": 300,
@@ -525,13 +469,6 @@
         "#news"
       ]
     },
-    "mit": {
-      "feed": "http://web.mit.edu/newsoffice/rss-feeds.feed?type=rss",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
     "mongrel2_master": {
       "feed": "https://github.com/zedshaw/mongrel2/commits/master.atom",
       "delay": 300,
@@ -581,22 +518,8 @@
         "#news"
       ]
     },
-    "npr_pol": {
-      "feed": "http://www.npr.org/rss/rss.php?id=1012",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
     "npr_world": {
       "feed": "http://www.npr.org/rss/rss.php?id=1004",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "nsa": {
-      "feed": "https://www.nsa.gov/rss.xml",
       "delay": 300,
       "extraChannels": [
         "#news"
@@ -749,36 +672,8 @@
         "#news"
       ]
     },
-    "reuters": {
-      "feed": "http://feeds.reuters.com/Reuters/worldNews",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "reuters-odd": {
-      "feed": "http://feeds.reuters.com/reuters/oddlyEnoughNews?format=xml",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "rt": {
-      "feed": "http://rt.com/rss/news/",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
     "schallurauch": {
       "feed": "http://feeds.feedburner.com/SchallUndRauch",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "sciencemag": {
-      "feed": "http://news.sciencemag.org/rss/current.xml",
       "delay": 300,
       "extraChannels": [
         "#news"
@@ -800,13 +695,6 @@
     },
     "shackspace": {
       "feed": "http://shackspace.de/atom.xml",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "shz_news": {
-      "feed": "http://www.shz.de/nachrichten/newsticker/rss",
       "delay": 300,
       "extraChannels": [
         "#news"
@@ -931,22 +819,8 @@
         "#news"
       ]
     },
-    "telegraph": {
-      "feed": "http://www.telegraph.co.uk/rss.xml",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
     "telepolis": {
       "feed": "http://www.heise.de/tp/rss/news-atom.xml",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "the_insider": {
-      "feed": "http://www.theinsider.org/rss/news/headlines-xml.asp",
       "delay": 300,
       "extraChannels": [
         "#news"
@@ -987,55 +861,6 @@
         "#news"
       ]
     },
-    "travel_warnings": {
-      "feed": "http://feeds.travel.state.gov/ca/travelwarnings-alerts",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "un_afr": {
-      "feed": "http://www.un.org/apps/news/rss/rss_africa.asp",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "un_am": {
-      "feed": "http://www.un.org/apps/news/rss/rss_americas.asp",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "un_eu": {
-      "feed": "http://www.un.org/apps/news/rss/rss_europe.asp",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "un_me": {
-      "feed": "http://www.un.org/apps/news/rss/rss_mideast.asp",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "un_pac": {
-      "feed": "http://www.un.org/apps/news/rss/rss_asiapac.asp",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "un_top": {
-      "feed": "http://www.un.org/apps/news/rss/rss_top.asp",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
     "us_math_society": {
       "feed": "http://www.ams.org/cgi-bin/content/news_items.cgi?rss=1",
       "delay": 300,
@@ -1045,13 +870,6 @@
     },
     "vimperator": {
       "feed": "https://sites.google.com/a/vimperator.org/www/blog/posts.xml",
-      "delay": 300,
-      "extraChannels": [
-        "#news"
-      ]
-    },
-    "weechat": {
-      "feed": "http://dev.weechat.org/feed/atom",
       "delay": 300,
       "extraChannels": [
         "#news"

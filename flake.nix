@@ -19,13 +19,17 @@
   in {
     overlays.default = final: prev: {
       brockman = prev.haskellPackages.callPackage ./default.nix {};
+      brockman-linkrot = prev.callPackage ./brockman-linkrot.nix {};
     };
 
-    packages = forAllSystems (system: {
-      default = (import nixpkgs {
+    packages = forAllSystems (system: let
+      pkgs = (import nixpkgs {
         inherit system;
         overlays = [ self.overlays.default ];
-      }).brockman;
+      });
+    in {
+      default = pkgs.brockman;
+      brockman-linkrot = pkgs.brockman-linkrot;
       vm = nixos-generators.nixosGenerate {
         format = "vm-nogui";
         pkgs = pkgsForSystem system;
