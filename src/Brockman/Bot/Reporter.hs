@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Brockman.Bot.Reporter where
 
@@ -21,27 +22,31 @@ import qualified Data.ByteString.Lazy as BL (toStrict)
 import qualified Data.Cache.LRU as LRU
 import Data.Conduit
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, maybeToList)
 import qualified Data.Text as T (Text, pack, unpack, unwords, words)
 import Data.Time.Clock (getCurrentTime)
 import Network.HTTP.Client (HttpException (HttpExceptionRequest), HttpExceptionContent (ConnectionFailure, StatusCodeException))
 import qualified Network.IRC.Conduit as IRC
 import Network.Socket (HostName)
 import Network.Wreq (FormParam ((:=)), defaults, getWith, header, postWith, responseBody, responseStatus, statusCode, statusMessage)
+import Safe (readMay)
 import System.Log.Logger
 import System.Random (randomRIO)
 import System.Timeout (timeout)
 import Text.Feed.Import (parseFeedSource)
 
 data ReporterMessage
-  = Pinged (IRC.ServerName BS.ByteString)
+  = Exception T.Text
+  | InfoRequested Channel
   | Invited Channel
   | Kicked Channel
   | Killed
-  | NewFeedItem FeedItem
-  | Exception T.Text
-  | Messaged BS.ByteString T.Text
   | MOTD
+  | Messaged BS.ByteString T.Text
+  | NewFeedItem FeedItem
+  | Pinged (IRC.ServerName BS.ByteString)
+  | SetUrl Channel URL
+  | Tick Channel (Maybe Integer)
   deriving (Show)
 
 -- return the current config or kill thread if the key is not present
@@ -79,6 +84,25 @@ reporterThread configMVar nick = do
               broadcastNotice channels message
             Messaged user message ->
               debug nick ("got a message from " <> show user <> ": " <> show message)
+            InfoRequested channel -> do
+              broadcast [channel] $
+                pure $
+                  case view (configBotsL . at nick) currentConfig of
+                    Just BotConfig {botFeed, botExtraChannels, botDelay} -> do
+                      T.unwords $ [botFeed, T.pack (show (configChannel : fromMaybe [] botExtraChannels))] ++ maybeToList (T.pack . show <$> botDelay)
+                    _ -> "huh?"
+
+            Tick channel tick -> do
+              liftIO $ update configMVar $ configBotsL . at nick . mapped . botDelayL .~ tick
+              notice nick ("change tick speed to " <> show tick)
+              channelsForNick <- botChannels nick <$> liftIO (readMVar configMVar)
+              broadcastNotice (channel:channelsForNick) $ T.pack (show nick) <> " @ " <> T.pack (maybe "auto" ((<> " seconds") . show) tick)
+
+            SetUrl channel url -> do
+              liftIO $ update configMVar $ configBotsL . at nick . mapped . botFeedL .~ url
+              notice nick $ "set url to " <> T.unpack url
+              channelsForNick <- botChannels nick <$> liftIO (readMVar configMVar)
+              broadcastNotice (channel:channelsForNick) $ T.pack (show nick) <> " -> " <> url
             Killed -> do
               liftIO $ update configMVar $ configBotsL . at nick .~ Nothing
               notice nick "killed"
@@ -106,9 +130,12 @@ reporterThread configMVar nick = do
           Just (Right (IRC.Event _ _ (IRC.Numeric 376 _))) ->
             liftIO $ writeChan chan MOTD
           Just (Right (IRC.Event _ (IRC.User user) (IRC.Privmsg _ (Right message)))) ->
-            case message of
-              "die" -> liftIO $ writeChan chan Killed
-              _ -> liftIO $ writeChan chan (Messaged user (decodeUtf8 message))
+            liftIO $ writeChan chan $ case bsWords message of
+              ["die"] -> Killed
+              ["info"] -> InfoRequested (decode user)
+              ["set-url", decodeUtf8 -> url] -> SetUrl (decode user) url
+              ["tick", decodeUtf8 -> tickString] -> Tick (decode user) $ readMay $ T.unpack tickString
+              _ -> Messaged user (decodeUtf8 message)
           _ -> pure ()
 
 getFeed :: URL -> IO (Maybe Integer, Either T.Text [FeedItem])
@@ -165,7 +192,7 @@ feedThread nick configMVar isFirstTime lru chan =
         return $ Just lru'
     tick <- scatterTick $ max 1 $ min 86400 $ fromMaybe fallbackDelay $ botDelay <|> newTick <|> defaultDelay
     debug nick $ "lrusize: " <> show (maybe 0 (fromMaybe 0 . LRU.maxSize) newLRU)
-    notice nick $ "tick " <> show tick
+    notice nick $ "tick " <> show tick <> " seconds"
     liftIO $ sleepSeconds tick
     feedThread nick configMVar False newLRU chan
   where
