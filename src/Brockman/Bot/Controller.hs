@@ -75,7 +75,7 @@ controllerThread configMVar = do
           speak chan = do
             handshake controllerNick initialControllerChannels
             forever $ do
-              config@BrockmanConfig {configBots, configController, configChannel} <- liftIO (readMVar configMVar)
+              config@BrockmanConfig {configController} <- liftIO (readMVar configMVar)
               case configController of
                 Nothing -> pure ()
                 Just _ -> do
@@ -99,7 +99,8 @@ controllerThread configMVar = do
                           "/invite " <> decodeUtf8 (encode controllerNick) <> " — invite the controller to your channel",
                           "/kick " <> decodeUtf8 (encode controllerNick) <> " — kick the controller from your channel"
                         ]
-                    Add nick url extraChannel ->
+                    Add nick url extraChannel -> do
+                      BrockmanConfig {configBots, configChannel} <- liftIO (readMVar configMVar)
                       case M.lookup nick configBots of
                         Just BotConfig {botFeed} -> broadcast (Set.singleton $ fromMaybe configChannel extraChannel) [T.pack (show nick) <> " is already serving " <> botFeed]
                         Nothing -> do
