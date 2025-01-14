@@ -6,7 +6,7 @@
 }:
 mkDerivation {
   pname = "brockman";
-  version = "5.1.1";
+  version = "5.2.0";
   src = ./.;
   isLibrary = false;
   isExecutable = true;
@@ -17,4 +17,5 @@ mkDerivation {
     random safe text time timerep unordered-containers wreq
   ];
   license = lib.licenses.mit;
+  mainProgram = "brockman";
 }
