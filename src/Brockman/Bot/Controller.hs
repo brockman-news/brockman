@@ -29,7 +29,6 @@ data ControllerCommand
   | Pinged (IRC.ServerName ByteString)
   | SetUrl Nick URL
   | Add Nick URL (Maybe Channel)
-  | Remove Nick
   | Tick Nick (Maybe Integer)
   | Invite Channel
   | Kick Channel
@@ -73,7 +72,6 @@ controllerThread configMVar = do
                         writeChan chan $
                           Add nick url $
                             if decode channel == configChannel initialConfig then Nothing else Just $ decode channel
-                    Just ["remove", decode -> nick] -> writeChan chan $ Remove nick
                     Just ["tick", decode -> nick, decodeUtf8 -> tickString] ->
                       writeChan chan $ Tick nick $ readMay $ T.unpack tickString
                     Just _ -> writeChan chan $ Help $ decode channel
@@ -101,9 +99,9 @@ controllerThread configMVar = do
                           "set-url NICK FEED_URL — change a bot's feed url",
                           "tick NICK SECONDS — change a bot's tick speed",
                           "add NICK FEED_URL — add a new bot to all channels I am in",
-                          "remove NICK — tell a bot to commit suicice",
                           "dump — upload the current config/state somewhere you can see it",
                           "/msg " <> decodeUtf8 (encode controllerNick) <> " subscribe NICK — subscribe to private messages from a bot",
+                          "/msg NICK die — tell a bot to commit suicice",
                           "/msg " <> decodeUtf8 (encode controllerNick) <> " unsubscribe NICK — unsubscribe to private messages from a bot",
                           "/invite NICK — invite a bot from your channel",
                           "/kick NICK — remove a bot from your channel",
@@ -122,11 +120,6 @@ controllerThread configMVar = do
                           liftIO $ update configMVar $ configBotsL . at nick ?~ BotConfig {botFeed = url, botDelay = Nothing, botExtraChannels = (: []) <$> extraChannel}
                           _ <- liftIO $ forkIO $ eloop $ reporterThread configMVar nick
                           pure ()
-                    Remove nick -> do
-                      liftIO $ update configMVar $ configBotsL . at nick .~ Nothing
-                      notice nick "remove"
-                      channelsForNick <- botChannels nick <$> liftIO (readMVar configMVar)
-                      broadcastNotice channelsForNick $ T.pack (show nick) <> " is expected to commit suicide soon"
                     SetUrl nick url -> do
                       liftIO $ update configMVar $ configBotsL . at nick . mapped . botFeedL .~ url
                       notice nick $ "set url to " <> T.unpack url

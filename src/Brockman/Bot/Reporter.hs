@@ -37,8 +37,10 @@ data ReporterMessage
   = Pinged (IRC.ServerName BS.ByteString)
   | Invited Channel
   | Kicked Channel
+  | Killed
   | NewFeedItem FeedItem
   | Exception T.Text
+  | Messaged BS.ByteString T.Text
   | MOTD
   deriving (Show)
 
@@ -75,6 +77,11 @@ reporterThread configMVar nick = do
                 else broadcast channels [displayItem item']
             Exception message ->
               broadcastNotice channels message
+            Messaged user message ->
+              debug nick ("got a message from " <> show user <> ": " <> show message)
+            Killed -> do
+              liftIO $ update configMVar $ configBotsL . at nick .~ Nothing
+              notice nick "killed"
             Kicked channel -> do
               liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ delete channel
               notice nick $ "kicked from " <> show channel
@@ -98,6 +105,10 @@ reporterThread configMVar nick = do
           -- 376 is RPL_ENDOFMOTD
           Just (Right (IRC.Event _ _ (IRC.Numeric 376 _))) ->
             liftIO $ writeChan chan MOTD
+          Just (Right (IRC.Event _ (IRC.User user) (IRC.Privmsg _ (Right message)))) ->
+            case message of
+              "die" -> liftIO $ writeChan chan Killed
+              _ -> liftIO $ writeChan chan (Messaged user (decodeUtf8 message))
           _ -> pure ()
 
 getFeed :: URL -> IO (Maybe Integer, Either T.Text [FeedItem])
