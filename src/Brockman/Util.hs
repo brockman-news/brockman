@@ -13,7 +13,8 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Char8 (all, uncons)
 import Data.ByteString.Lazy (toStrict)
 import Data.Char (isAsciiLower, isAsciiUpper)
-import Data.List (delete, insert)
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.Text (Text, unpack)
 import qualified Data.Text as T (words)
 import Data.Text.Encoding (decodeUtf8With, encodeUtf8)
@@ -58,18 +59,19 @@ suicide = killThread =<< myThreadId
 decodeUtf8 :: ByteString -> Text
 decodeUtf8 = decodeUtf8With $ \_error _ -> Just '?'
 
-insert :: (Ord a) => a -> Maybe [a] -> Maybe [a]
-insert value list
-  | Just values <- list, value `elem` values = list
-  | otherwise = case Data.List.insert value <$> list of
-    Nothing -> Just [value]
-    Just xs -> Just xs
+insert :: (Ord a) => a -> Maybe (Set a) -> Maybe (Set a)
+insert value list =
+  Just $ case list of
+    Nothing -> Set.singleton value
+    Just values -> Set.insert value values
 
-delete :: (Ord a) => a -> Maybe [a] -> Maybe [a]
-delete value list = case Data.List.delete value <$> list of
-  Nothing -> Nothing
-  Just [] -> Nothing
-  Just xs -> Just xs
+delete :: (Ord a) => a -> Maybe (Set a) -> Maybe (Set a)
+delete value list =
+  case Set.delete value <$> list of
+    Just xs
+      | Set.null xs -> Nothing
+      | otherwise -> Just xs
+    Nothing -> Nothing
 
 bsWords :: ByteString -> [ByteString]
 bsWords = map encodeUtf8 . T.words . decodeUtf8

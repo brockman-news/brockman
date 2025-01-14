@@ -22,6 +22,7 @@ import Data.Data (Data, constrFields, toConstr)
 import Data.List (intercalate)
 import Data.Map.Strict (Map, lookup, union)
 import Data.Maybe (fromMaybe)
+import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import Data.Text.Encoding (decodeUtf8, encodeUtf8)
@@ -71,7 +72,7 @@ configBotsL = lens configBots (\config bots -> config {configBots = bots})
 configControllerL :: Lens' BrockmanConfig (Maybe ControllerConfig)
 configControllerL = lens configController (\config controller -> config {configController = controller})
 
-controllerExtraChannelsL :: Lens' ControllerConfig (Maybe [Channel])
+controllerExtraChannelsL :: Lens' ControllerConfig (Maybe (Set Channel))
 controllerExtraChannelsL = lens controllerExtraChannels (\controller channels -> controller {controllerExtraChannels = channels})
 
 botFeedL :: Lens' BotConfig URL
@@ -80,11 +81,11 @@ botFeedL = lens botFeed (\bot feed -> bot {botFeed = feed})
 botDelayL :: Lens' BotConfig (Maybe Integer)
 botDelayL = lens botDelay (\bot delay -> bot {botDelay = delay})
 
-botExtraChannelsL :: Lens' BotConfig (Maybe [Channel])
+botExtraChannelsL :: Lens' BotConfig (Maybe (Set Channel))
 botExtraChannelsL = lens botExtraChannels (\bot channels -> bot {botExtraChannels = channels})
 
-botChannels :: Nick -> BrockmanConfig -> [Channel]
-botChannels nick config = (configChannel config :) $ fromMaybe [] $ botExtraChannels =<< Data.Map.Strict.lookup nick (configBots config)
+botChannels :: Nick -> BrockmanConfig -> Set Channel
+botChannels nick config = Set.insert (configChannel config) $ fromMaybe Set.empty $ botExtraChannels =<< Data.Map.Strict.lookup nick (configBots config)
 
 mergeIrcConfig :: IrcConfig -> IrcConfig -> IrcConfig
 mergeIrcConfig a b =
@@ -140,7 +141,7 @@ data BrockmanConfig = BrockmanConfig
 
 data ControllerConfig = ControllerConfig
   { controllerNick :: Nick,
-    controllerExtraChannels :: Maybe [Channel]
+    controllerExtraChannels :: Maybe (Set Channel)
   }
   deriving (Data, Generic, Show, Typeable)
 
@@ -153,7 +154,7 @@ data IrcConfig = IrcConfig
 
 data BotConfig = BotConfig
   { botFeed :: URL,
-    botExtraChannels :: Maybe [Channel],
+    botExtraChannels :: Maybe (Set Channel),
     botDelay :: Maybe Integer
   }
   deriving (Data, Generic, Show, Typeable)

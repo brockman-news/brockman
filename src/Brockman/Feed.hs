@@ -92,7 +92,7 @@ deduplicate maybeLRU items
   | Just lru <- maybeLRU,
     Just capacity <- LRU.maxSize lru,
     capacity >= genericLength items =
-    insertItems lru items
+      insertItems lru items
   | otherwise = insertItems (LRU.newLRU (Just $ genericLength items * 2)) items
   where
     key = hash . itemLink

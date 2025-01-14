@@ -23,6 +23,7 @@ import qualified Data.Cache.LRU as LRU
 import Data.Conduit
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, maybeToList)
+import qualified Data.Set as Set
 import qualified Data.Text as T (Text, pack, unpack, unwords, words)
 import Data.Time.Clock (getCurrentTime)
 import Network.HTTP.Client (HttpException (HttpExceptionRequest), HttpExceptionContent (ConnectionFailure, StatusCodeException))
@@ -60,7 +61,7 @@ reporterThread configMVar nick = do
   config@BrockmanConfig {configChannel, configShortener, configShowEntryDate} <- readMVar configMVar
   withIrcConnection config listen $ \chan -> do
     withCurrentBotConfig nick configMVar $ \initialBotConfig -> do
-      handshake nick $ configChannel : fromMaybe [] (botExtraChannels initialBotConfig)
+      handshake nick $ Set.insert configChannel (fromMaybe Set.empty (botExtraChannels initialBotConfig))
       deafen nick
       _ <- liftIO $ forkIO $ feedThread nick configMVar True Nothing chan
       forever $
@@ -85,24 +86,22 @@ reporterThread configMVar nick = do
             Messaged user message ->
               debug nick ("got a message from " <> show user <> ": " <> show message)
             InfoRequested channel -> do
-              broadcast [channel] $
+              broadcast (Set.singleton channel) $
                 pure $
                   case view (configBotsL . at nick) currentConfig of
                     Just BotConfig {botFeed, botExtraChannels, botDelay} -> do
-                      T.unwords $ [botFeed, T.pack (show (configChannel : fromMaybe [] botExtraChannels))] ++ maybeToList (T.pack . show <$> botDelay)
+                      T.unwords $ [botFeed, T.pack (show (Set.insert configChannel $ fromMaybe Set.empty botExtraChannels))] ++ maybeToList (T.pack . show <$> botDelay)
                     _ -> "huh?"
-
             Tick channel tick -> do
               liftIO $ update configMVar $ configBotsL . at nick . mapped . botDelayL .~ tick
               notice nick ("change tick speed to " <> show tick)
               channelsForNick <- botChannels nick <$> liftIO (readMVar configMVar)
-              broadcastNotice (channel:channelsForNick) $ T.pack (show nick) <> " @ " <> T.pack (maybe "auto" ((<> " seconds") . show) tick)
-
+              broadcastNotice (Set.insert channel channelsForNick) $ T.pack (show nick) <> " @ " <> T.pack (maybe "auto" ((<> " seconds") . show) tick)
             SetUrl channel url -> do
               liftIO $ update configMVar $ configBotsL . at nick . mapped . botFeedL .~ url
               notice nick $ "set url to " <> T.unpack url
               channelsForNick <- botChannels nick <$> liftIO (readMVar configMVar)
-              broadcastNotice (channel:channelsForNick) $ T.pack (show nick) <> " -> " <> url
+              broadcastNotice (Set.insert channel channelsForNick) $ T.pack (show nick) <> " -> " <> url
             Killed -> do
               liftIO $ update configMVar $ configBotsL . at nick .~ Nothing
               notice nick "killed"
@@ -125,7 +124,7 @@ reporterThread configMVar nick = do
             liftIO $ writeChan chan $ Invited $ decode channel
           Just (Right (IRC.Event _ _ (IRC.Kick channel nick' _)))
             | nick == decode nick' ->
-              liftIO $ writeChan chan $ Kicked $ decode channel
+                liftIO $ writeChan chan $ Kicked $ decode channel
           -- 376 is RPL_ENDOFMOTD
           Just (Right (IRC.Event _ _ (IRC.Numeric 376 _))) ->
             liftIO $ writeChan chan MOTD

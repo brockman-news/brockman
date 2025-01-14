@@ -20,6 +20,7 @@ import qualified Data.ByteString as B
 import Data.Conduit
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Network.IRC.Conduit as IRC
 
@@ -42,7 +43,7 @@ controllerThread configMVar = do
   case configController initialConfig of
     Nothing -> pure ()
     Just initialControllerConfig@ControllerConfig {controllerNick} ->
-      let initialControllerChannels = configChannel initialConfig : fromMaybe [] (controllerExtraChannels initialControllerConfig)
+      let initialControllerChannels = Set.insert (configChannel initialConfig) $ fromMaybe Set.empty (controllerExtraChannels initialControllerConfig)
           listen chan =
             forever $
               await >>= \case
@@ -62,9 +63,9 @@ controllerThread configMVar = do
                     Just ["help"] -> writeChan chan $ Help $ decode channel
                     Just ["add", decode -> nick, decodeUtf8 -> url]
                       | "http" `T.isPrefixOf` url && isValidIrcNick nick ->
-                        writeChan chan $
-                          Add nick url $
-                            if decode channel == configChannel initialConfig then Nothing else Just $ decode channel
+                          writeChan chan $
+                            Add nick url $
+                              if decode channel == configChannel initialConfig then Nothing else Just $ decode channel
                     Just _ -> writeChan chan $ Help $ decode channel
                     _ -> pure ()
                 -- 376 is RPL_ENDOFMOTD
@@ -83,7 +84,7 @@ controllerThread configMVar = do
                   case command of
                     Help channel -> do
                       broadcast
-                        [channel]
+                        (Set.singleton channel)
                         [ "help — send this helpful message",
                           "add NICK FEED_URL — add a new bot to all channels I am in",
                           "dump — upload the current config/state somewhere you can see it",
@@ -100,9 +101,9 @@ controllerThread configMVar = do
                         ]
                     Add nick url extraChannel ->
                       case M.lookup nick configBots of
-                        Just BotConfig {botFeed} -> broadcast [fromMaybe configChannel extraChannel] [T.pack (show nick) <> " is already serving " <> botFeed]
+                        Just BotConfig {botFeed} -> broadcast (Set.singleton $ fromMaybe configChannel extraChannel) [T.pack (show nick) <> " is already serving " <> botFeed]
                         Nothing -> do
-                          liftIO $ update configMVar $ configBotsL . at nick ?~ BotConfig {botFeed = url, botDelay = Nothing, botExtraChannels = (: []) <$> extraChannel}
+                          liftIO $ update configMVar $ configBotsL . at nick ?~ BotConfig {botFeed = url, botDelay = Nothing, botExtraChannels = Set.singleton <$> extraChannel}
                           _ <- liftIO $ forkIO $ eloop $ reporterThread configMVar nick
                           pure ()
                     Pinged serverName -> do
@@ -118,13 +119,13 @@ controllerThread configMVar = do
                     Subscribe user nick -> do
                       liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ insert user
                       notice nick $ show user <> " has subscribed"
-                      broadcast [user] ["subscribed to " <> T.pack (show nick)]
+                      broadcast (Set.singleton user) ["subscribed to " <> T.pack (show nick)]
                     Unsubscribe user nick -> do
                       liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ delete user
                       notice nick $ show user <> " has unsubscribed"
-                      broadcast [user] ["unsubscribed from " <> T.pack (show nick)]
+                      broadcast (Set.singleton user) ["unsubscribed from " <> T.pack (show nick)]
                     Dump channel ->
-                      broadcast [channel] . (: []) =<< case configPastebin config of
+                      broadcast (Set.singleton channel) . (: []) =<< case configPastebin config of
                         Just endpoint -> liftIO $ pasteJson endpoint config
                         Nothing -> pure "No pastebin set"
                     MOTD -> do

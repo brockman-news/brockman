@@ -9,7 +9,9 @@ import Control.Concurrent.Chan
 import Data.ByteString (ByteString)
 import Data.Conduit
 import Data.Conduit.List (sourceList)
+import Data.Foldable (toList)
 import Data.Maybe
+import Data.Set (Set)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import qualified Network.IRC.Conduit as IRC
@@ -30,30 +32,30 @@ withIrcConnection BrockmanConfig {configIrc} listen speak = do
     host = ircHost configIrc
     tls = ircTls configIrc == Just True
 
-handshake :: Nick -> [Channel] -> ConduitM () IRC.IrcMessage IO ()
+handshake :: Nick -> Set Channel -> ConduitM () IRC.IrcMessage IO ()
 handshake nick channels = do
   notice nick ("handshake, joining " <> show channels)
   yield $ IRC.Nick $ encode nick
   yield $ IRC.RawMsg $ "USER " <> encode nick <> " * 0 :" <> encode nick
-  mapM_ (yield . IRC.Join . encode) channels
+  mapM_ (yield . IRC.Join . encode) (toList channels)
 
 deafen :: Nick -> ConduitM () IRC.IrcMessage IO ()
-deafen nick = yield $ IRC.Mode (encode nick) False [] ["+D"] -- deafen to PRIVMSGs
+deafen nick = yield $ IRC.Mode (encode nick) False [] ["+D"] -- deafen to PRIVMSGs in channels (query still works)
 
 -- maybe join channels separated by comma
 
-broadcastNotice :: (Monad m) => [Channel] -> T.Text -> ConduitT i (IRC.Message ByteString) m ()
+broadcastNotice :: (Monad m) => Set Channel -> T.Text -> ConduitT i (IRC.Message ByteString) m ()
 broadcastNotice channels message =
   sourceList
     [ IRC.Notice (encode channel) $ Right $ encodeUtf8 message
-      | channel <- channels
+      | channel <- toList channels
     ]
 
-broadcast :: (Monad m) => [Channel] -> [T.Text] -> ConduitT i (IRC.Message ByteString) m ()
+broadcast :: (Monad m) => Set Channel -> [T.Text] -> ConduitT i (IRC.Message ByteString) m ()
 broadcast channels messages =
   sourceList
     [ IRC.Privmsg (encode channel) $ Right $ encodeIRCMessage message
-      | channel <- channels,
+      | channel <- toList channels,
         message <- messages
     ]
 
