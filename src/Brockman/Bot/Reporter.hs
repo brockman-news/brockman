@@ -21,10 +21,11 @@ import qualified Data.ByteString as BS (ByteString)
 import qualified Data.ByteString.Lazy as BL (toStrict)
 import qualified Data.Cache.LRU as LRU
 import Data.Conduit
+import Data.Foldable
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, maybeToList)
 import qualified Data.Set as Set
-import qualified Data.Text as T (Text, pack, unpack, unwords, words)
+import qualified Data.Text as T (Text, intercalate, pack, unpack, unwords, words)
 import Data.Time.Clock (getCurrentTime)
 import Network.HTTP.Client (HttpException (HttpExceptionRequest), HttpExceptionContent (ConnectionFailure, StatusCodeException))
 import qualified Network.IRC.Conduit as IRC
@@ -61,9 +62,10 @@ reporterThread configMVar nick = do
   config@BrockmanConfig {configChannel, configShortener, configShowEntryDate} <- readMVar configMVar
   withIrcConnection config listen $ \chan -> do
     withCurrentBotConfig nick configMVar $ \initialBotConfig -> do
+      tickMVar <- liftIO newEmptyMVar
       handshake nick $ Set.insert configChannel (fromMaybe Set.empty (botExtraChannels initialBotConfig))
       deafen nick
-      _ <- liftIO $ forkIO $ feedThread nick configMVar True Nothing chan
+      _ <- liftIO $ forkIO $ feedThread nick tickMVar configMVar True Nothing chan
       forever $
         withCurrentBotConfig nick configMVar $ \_ -> do
           currentConfig <- liftIO (readMVar configMVar)
@@ -86,11 +88,18 @@ reporterThread configMVar nick = do
             Messaged user message ->
               debug nick ("got a message from " <> show user <> ": " <> show message)
             InfoRequested channel -> do
+              maybeTick <- liftIO $ tryReadMVar tickMVar
               broadcast (Set.singleton channel) $
                 pure $
                   case view (configBotsL . at nick) currentConfig of
                     Just BotConfig {botFeed, botExtraChannels, botDelay} -> do
-                      T.unwords $ [botFeed, T.pack (show (Set.insert configChannel $ fromMaybe Set.empty botExtraChannels))] ++ maybeToList (T.pack . show <$> botDelay)
+                      T.unwords $
+                        [ "I serve the feed <" <> botFeed <> ">",
+                          "to " <> T.intercalate ", " (map (decodeUtf8 . encode) (toList $ Set.insert configChannel $ fromMaybe Set.empty botExtraChannels)) <> ".",
+                          "Refresh rate:"
+                        ]
+                          ++ maybeToList ((<> "s") . T.pack . show <$> maybeTick)
+                          ++ maybeToList (("configured " <>) . (<> "s") . T.pack . show <$> botDelay)
                     _ -> "huh?"
             Tick channel tick -> do
               liftIO $ update configMVar $ configBotsL . at nick . mapped . botDelayL .~ tick
@@ -163,8 +172,8 @@ getFeed url =
     options = defaults & header "Accept" .~ ["application/atom+xml", "application/rss+xml", "*/*"]
     second = 10 ^ (6 :: Int)
 
-feedThread :: Nick -> MVar BrockmanConfig -> Bool -> Maybe LRU -> Chan ReporterMessage -> IO ()
-feedThread nick configMVar isFirstTime lru chan =
+feedThread :: Nick -> MVar Integer -> MVar BrockmanConfig -> Bool -> Maybe LRU -> Chan ReporterMessage -> IO ()
+feedThread nick tickMVar configMVar isFirstTime lru chan =
   withCurrentBotConfig nick configMVar $ \BotConfig {botDelay, botFeed} -> do
     defaultDelay <- configDefaultDelay <$> readMVar configMVar
     maxStartDelay <- configMaxStartDelay <$> readMVar configMVar
@@ -190,10 +199,11 @@ feedThread nick configMVar isFirstTime lru chan =
         unless isFirstTime $ writeList2Chan chan $ map NewFeedItem items
         return $ Just lru'
     tick <- scatterTick $ max 1 $ min 86400 $ fromMaybe fallbackDelay $ botDelay <|> newTick <|> defaultDelay
+    putMVar tickMVar tick
     debug nick $ "lrusize: " <> show (maybe 0 (fromMaybe 0 . LRU.maxSize) newLRU)
     notice nick $ "tick " <> show tick <> " seconds"
     liftIO $ sleepSeconds tick
-    feedThread nick configMVar False newLRU chan
+    feedThread nick tickMVar configMVar False newLRU chan
   where
     fallbackDelay = 300
     scatterTick x = (+) (x `div` 2) <$> randomRIO (0, x `div` 2)
