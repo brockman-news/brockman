@@ -48,7 +48,9 @@ data ReporterMessage
   | NewFeedItem FeedItem
   | Pinged (IRC.ServerName BS.ByteString)
   | SetUrl Channel URL
+  | Subscribe Channel
   | Tick Channel (Maybe Integer)
+  | Unsubscribe Channel
   deriving (Show)
 
 -- return the current config or kill thread if the key is not present
@@ -87,6 +89,14 @@ reporterThread configMVar nick = do
               broadcastNotice channels message
             Messaged user message ->
               debug nick ("got a message from " <> show user <> ": " <> show message)
+            Subscribe user -> do
+              liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ insert user
+              notice nick $ show user <> " has subscribed"
+              broadcast (Set.singleton user) ["subscribed to " <> T.pack (show nick)]
+            Unsubscribe user -> do
+              liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ delete user
+              notice nick $ show user <> " has unsubscribed"
+              broadcast (Set.singleton user) ["unsubscribed from " <> T.pack (show nick)]
             InfoRequested channel -> do
               maybeTick <- liftIO $ tryReadMVar tickMVar
               broadcast (Set.singleton channel) $
@@ -140,6 +150,8 @@ reporterThread configMVar nick = do
           Just (Right (IRC.Event _ (IRC.User user) (IRC.Privmsg _ (Right message)))) ->
             liftIO $ writeChan chan $ case bsWords message of
               ["die"] -> Killed
+              ["subscribe"] -> Subscribe (decode user)
+              ["unsubscribe"] -> Unsubscribe (decode user)
               ["info"] -> InfoRequested (decode user)
               ["set-url", decodeUtf8 -> url] -> SetUrl (decode user) url
               ["tick", decodeUtf8 -> tickString] -> Tick (decode user) $ readMay $ T.unpack tickString

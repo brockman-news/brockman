@@ -32,8 +32,6 @@ data ControllerCommand
   | Kick Channel
   | MOTD
   | Pinged (IRC.ServerName ByteString)
-  | Subscribe Channel {- subscriber -} Nick {- bot -}
-  | Unsubscribe Channel {- subscriber -} Nick {- bot -}
   deriving (Show)
 
 controllerThread :: MVar BrockmanConfig -> IO ()
@@ -52,8 +50,6 @@ controllerThread configMVar = do
                 Just (Right (IRC.Event _ _ (IRC.Ping s _))) -> liftIO $ writeChan chan (Pinged s)
                 Just (Right (IRC.Event _ (IRC.User user) (IRC.Privmsg _ (Right message)))) ->
                   liftIO $ case bsWords message of
-                    ["subscribe", decode -> nick] -> writeChan chan $ Subscribe (decode user) nick
-                    ["unsubscribe", decode -> nick] -> writeChan chan $ Unsubscribe (decode user) nick
                     ["help"] -> writeChan chan $ Help $ decode user
                     ["dump"] -> writeChan chan $ Dump $ decode user
                     _ -> pure ()
@@ -88,12 +84,12 @@ controllerThread configMVar = do
                         [ "help — send this helpful message",
                           "add NICK FEED_URL — add a new bot to all channels I am in",
                           "dump — upload the current config/state somewhere you can see it",
-                          "/msg " <> decodeUtf8 (encode controllerNick) <> " subscribe NICK — subscribe to private messages from a bot",
                           "/msg NICK die — tell a bot to commit suicice",
                           "/msg NICK info — display a bot's settings",
                           "/msg NICK tick SECONDS — change a bot's tick speed",
                           "/msg NICK set-url FEED_URL — change a bot's feed url",
-                          "/msg " <> decodeUtf8 (encode controllerNick) <> " unsubscribe NICK — unsubscribe to private messages from a bot",
+                          "/msg NICK subscribe — subscribe to private messages from a bot",
+                          "/msg NICK unsubscribe — unsubscribe to private messages from a bot",
                           "/invite NICK — invite a bot from your channel",
                           "/kick NICK — remove a bot from your channel",
                           "/invite " <> decodeUtf8 (encode controllerNick) <> " — invite the controller to your channel",
@@ -117,14 +113,6 @@ controllerThread configMVar = do
                       liftIO $ update configMVar $ configControllerL . mapped . controllerExtraChannelsL %~ insert channel
                       notice controllerNick $ "invited to " <> show channel
                       yield $ IRC.Join $ encode channel
-                    Subscribe user nick -> do
-                      liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ insert user
-                      notice nick $ show user <> " has subscribed"
-                      broadcast (Set.singleton user) ["subscribed to " <> T.pack (show nick)]
-                    Unsubscribe user nick -> do
-                      liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ delete user
-                      notice nick $ show user <> " has unsubscribed"
-                      broadcast (Set.singleton user) ["unsubscribed from " <> T.pack (show nick)]
                     Dump channel ->
                       broadcast (Set.singleton channel) . (: []) =<< case configPastebin config of
                         Just endpoint -> liftIO $ pasteJson endpoint config
