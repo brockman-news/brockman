@@ -2,7 +2,7 @@
 
 module Brockman.Util where
 
-import Brockman.Types (Encode (encode), Nick)
+import Brockman.Types (encode, Nick)
 import Control.Concurrent (killThread, myThreadId, threadDelay)
 import Control.Exception (SomeException, handle)
 import Control.Lens
@@ -37,21 +37,24 @@ sleepSeconds n = threadDelay $ fromInteger (n * (^) @Integer @Integer 10 6)
 optionally :: (Applicative f) => (a -> f ()) -> Maybe a -> f ()
 optionally = maybe (pure ())
 
+formatLogMessage :: Nick -> String -> String
+formatLogMessage nick message = "[" <> unpack (decodeUtf8 (encode nick)) <> "] " <> message
+
 notice :: (MonadIO m) => Nick -> String -> m ()
 notice nick message =
-  liftIO $ noticeM "brockman" ("[" <> show nick <> "] " <> message)
+  liftIO $ noticeM "brockman" $ formatLogMessage nick message
 
 debug :: (MonadIO m) => Nick -> String -> m ()
 debug nick message =
-  liftIO $ debugM "brockman" ("[" <> show nick <> "] " <> message)
+  liftIO $ debugM "brockman" $ formatLogMessage nick message
 
 warning :: (MonadIO m) => Nick -> String -> m ()
 warning nick message =
-  liftIO $ warningM "brockman" ("[" <> show nick <> "] " <> message)
+  liftIO $ warningM "brockman" $ formatLogMessage nick message
 
 error' :: (MonadIO m) => Nick -> String -> m ()
 error' nick message =
-  liftIO $ errorM "brockman" ("[" <> show nick <> "] " <> message)
+  liftIO $ errorM "brockman" $ formatLogMessage nick message
 
 suicide :: IO ()
 suicide = killThread =<< myThreadId
