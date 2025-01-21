@@ -9,7 +9,7 @@ import Brockman.Bot
 import Brockman.Feed
 import Brockman.Types
 import Brockman.Util
-import Control.Applicative (Alternative (..))
+import Data.IORef
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan
 import Control.Concurrent.MVar
@@ -64,13 +64,13 @@ withCurrentBotConfig nick configMVar handler = do
 
 reporterThread :: MVar BrockmanConfig -> Nick -> IO ()
 reporterThread configMVar nick = do
-  config@BrockmanConfig {configChannel, configShortener, configShowEntryDate} <- readMVar configMVar
+  config@BrockmanConfig {configChannel, configShortener, configDefaultDelay, configShowEntryDate} <- readMVar configMVar
   withIrcConnection config listen $ \chan -> do
     withCurrentBotConfig nick configMVar $ \initialBotConfig -> do
-      tickMVar <- liftIO newEmptyMVar
+      tickRef <- liftIO $ newIORef (fromMaybe defaultTick configDefaultDelay)
       handshake nick $ Set.insert configChannel (fromMaybe Set.empty (botExtraChannels initialBotConfig))
       deafen nick
-      _ <- liftIO $ forkIO $ feedThread nick tickMVar configMVar True Nothing chan
+      _ <- liftIO $ forkIO $ feedThread nick tickRef configMVar True Nothing chan
       forever $
         withCurrentBotConfig nick configMVar $ \_ -> do
           currentConfig <- liftIO (readMVar configMVar)
@@ -101,7 +101,7 @@ reporterThread configMVar nick = do
               notice nick $ show user <> " has unsubscribed"
               broadcast (Set.singleton user) ["unsubscribed from " <> T.pack (show nick)]
             InfoRequested channel -> do
-              maybeTick <- liftIO $ tryReadMVar tickMVar
+              theTick <- liftIO $ readIORef tickRef
               broadcast (Set.singleton channel) $
                 pure $
                   case view (configBotsL . at nick) currentConfig of
@@ -109,9 +109,8 @@ reporterThread configMVar nick = do
                       T.unwords $
                         [ "I serve the feed <" <> botFeed <> ">",
                           "to " <> T.intercalate ", " (map (decodeUtf8 . encode) (toList $ Set.insert configChannel $ fromMaybe Set.empty botExtraChannels)) <> ".",
-                          "Refresh rate:"
+                          "Refresh rate: " <> T.pack (show theTick) <> "s"
                         ]
-                          ++ maybeToList ((<> "s") . T.pack . show <$> maybeTick)
                           ++ maybeToList (("configured " <>) . (<> "s") . T.pack . show <$> botDelay)
                     _ -> "huh?"
             Tick channel tick -> do
@@ -189,10 +188,9 @@ getFeed url =
     options = defaults & header "Accept" .~ ["application/atom+xml", "application/rss+xml", "*/*"]
     second = 10 ^ (6 :: Int)
 
-feedThread :: Nick -> MVar Integer -> MVar BrockmanConfig -> Bool -> Maybe LRU -> Chan ReporterMessage -> IO ()
-feedThread nick tickMVar configMVar isFirstTime lru chan =
+feedThread :: Nick -> IORef Integer -> MVar BrockmanConfig -> Bool -> Maybe LRU -> Chan ReporterMessage -> IO ()
+feedThread nick tickRef configMVar isFirstTime lru chan =
   withCurrentBotConfig nick configMVar $ \BotConfig {botDelay, botFeed} -> do
-    defaultDelay <- configDefaultDelay <$> readMVar configMVar
     maxStartDelay <- configMaxStartDelay <$> readMVar configMVar
     notifyErrors <- configNotifyErrors <$> readMVar configMVar
     liftIO $
@@ -204,24 +202,25 @@ feedThread nick tickMVar configMVar isFirstTime lru chan =
     feedResult <- liftIO $ getFeed botFeed
     (newTick, newLRU) <- case feedResult of
       Left message -> do
-        error' nick $ "exception" <> T.unpack message
+        error' nick $ "exception: " <> T.unpack message
         when (fromMaybe True notifyErrors) $ writeChan chan $ Exception $ message <> " — " <> botFeed
-        oldTick <- tryReadMVar tickMVar
+        oldTick <- readIORef tickRef
         debug nick $ "exponential backoff: " <> show oldTick
-        return 
-          ( fmap (* 2) oldTick -- exponential backoff
+        return
+          ( oldTick * 2 -- exponential backoff
           , lru
           )
       Right (newTick, feedItems) -> do
+        debug nick $ "got new tick: " <> show newTick
         let (lru', items) = deduplicate lru feedItems
         unless isFirstTime $ writeList2Chan chan $ map NewFeedItem items
-        return (Just newTick, Just lru')
-    tick <- scatterTick $ max 1 $ min 86400 $ fromMaybe defaultTick $ botDelay <|> newTick <|> defaultDelay
-    _ <- swapMVar tickMVar tick
+        return (newTick, Just lru')
+    tick <- scatterTick $ max 1 $ min 86400 $ fromMaybe newTick botDelay
+    writeIORef tickRef tick
     debug nick $ "lrusize: " <> show (maybe 0 (fromMaybe 0 . LRU.maxSize) newLRU)
     notice nick $ "tick " <> show tick <> " seconds"
     liftIO $ sleepSeconds tick
-    feedThread nick tickMVar configMVar False newLRU chan
+    feedThread nick tickRef configMVar False newLRU chan
   where
     scatterTick x = (+) (x `div` 2) <$> randomRIO (0, x `div` 2)
 
