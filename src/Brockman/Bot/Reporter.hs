@@ -211,7 +211,7 @@ feedThread nick tickMVar configMVar isFirstTime lru chan =
         unless isFirstTime $ writeList2Chan chan $ map NewFeedItem items
         return $ Just lru'
     tick <- scatterTick $ max 1 $ min 86400 $ fromMaybe fallbackDelay $ botDelay <|> newTick <|> defaultDelay
-    putMVar tickMVar tick
+    _ <- swapMVar tickMVar tick
     debug nick $ "lrusize: " <> show (maybe 0 (fromMaybe 0 . LRU.maxSize) newLRU)
     notice nick $ "tick " <> show tick <> " seconds"
     liftIO $ sleepSeconds tick
