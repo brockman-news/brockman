@@ -37,6 +37,9 @@ import System.Random (randomRIO)
 import System.Timeout (timeout)
 import Text.Feed.Import (parseFeedSource)
 
+defaultTick :: Integer
+defaultTick = 300 -- seconds
+
 data ReporterMessage
   = Exception T.Text
   | InfoRequested Channel
@@ -158,11 +161,11 @@ reporterThread configMVar nick = do
               _ -> Messaged user (decodeUtf8 message)
           _ -> pure ()
 
-getFeed :: URL -> IO (Maybe Integer, Either T.Text [FeedItem])
+getFeed :: URL -> IO (Either T.Text (Integer, [FeedItem]))
 getFeed url =
   timeout (100 * second) (E.try (getWith options (T.unpack url))) >>= \case
     Nothing ->
-      return (Nothing, Left "Timeout")
+      return (Left "Timeout")
     Just (Left exception) ->
       let mircRed text = "\ETX4,99" <> text <> "\ETX" -- ref https://www.mirc.com/colors.html
           message = mircRed $
@@ -173,13 +176,15 @@ getFeed url =
                 HttpExceptionRequest _ (ConnectionFailure _) -> "Connection failure"
                 HttpExceptionRequest _ exceptionContent -> T.pack $ show exceptionContent
                 _ -> T.pack $ show exception
-       in return (Nothing, Left message)
+       in return $ Left message
     Just (Right response) -> do
       now <- liftIO getCurrentTime
       let feed = parseFeedSource $ response ^. responseBody
           delta = feedEntryDelta now =<< feed
           feedItems = feedToItems feed
-      return (delta, Right feedItems)
+      return $ if null feedItems
+        then Left "Feed is empty"
+        else Right (fromMaybe defaultTick delta, feedItems)
   where
     options = defaults & header "Accept" .~ ["application/atom+xml", "application/rss+xml", "*/*"]
     second = 10 ^ (6 :: Int)
@@ -196,28 +201,28 @@ feedThread nick tickMVar configMVar isFirstTime lru chan =
         debug nick $ "sleep " <> show randomDelay
         sleepSeconds randomDelay
     debug nick ("fetch " <> T.unpack botFeed)
-    (newTick, exceptionOrFeed) <- liftIO $ getFeed botFeed
-    newLRU <- case exceptionOrFeed of
+    feedResult <- liftIO $ getFeed botFeed
+    (newTick, newLRU) <- case feedResult of
       Left message -> do
         error' nick $ "exception" <> T.unpack message
         when (fromMaybe True notifyErrors) $ writeChan chan $ Exception $ message <> " — " <> botFeed
-        return lru
-      Right [] -> do
-        warning nick $ "Feed is empty: " <> T.unpack botFeed
-        when (fromMaybe True notifyErrors) $ writeChan chan $ Exception $ "feed is empty: " <> botFeed
-        return lru
-      Right feedItems -> do
+        oldTick <- tryReadMVar tickMVar
+        debug nick $ "exponential backoff: " <> show oldTick
+        return 
+          ( fmap (* 2) oldTick -- exponential backoff
+          , lru
+          )
+      Right (newTick, feedItems) -> do
         let (lru', items) = deduplicate lru feedItems
         unless isFirstTime $ writeList2Chan chan $ map NewFeedItem items
-        return $ Just lru'
-    tick <- scatterTick $ max 1 $ min 86400 $ fromMaybe fallbackDelay $ botDelay <|> newTick <|> defaultDelay
+        return (Just newTick, Just lru')
+    tick <- scatterTick $ max 1 $ min 86400 $ fromMaybe defaultTick $ botDelay <|> newTick <|> defaultDelay
     _ <- swapMVar tickMVar tick
     debug nick $ "lrusize: " <> show (maybe 0 (fromMaybe 0 . LRU.maxSize) newLRU)
     notice nick $ "tick " <> show tick <> " seconds"
     liftIO $ sleepSeconds tick
     feedThread nick tickMVar configMVar False newLRU chan
   where
-    fallbackDelay = 300
     scatterTick x = (+) (x `div` 2) <$> randomRIO (0, x `div` 2)
 
 shortenWith :: FeedItem -> HostName -> IO FeedItem
