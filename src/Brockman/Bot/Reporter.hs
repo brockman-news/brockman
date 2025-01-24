@@ -25,7 +25,7 @@ import Data.Foldable
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, maybeToList)
 import qualified Data.Set as Set
-import qualified Data.Text as T (Text, intercalate, pack, unpack, unwords, words)
+import qualified Data.Text as T (Text, intercalate, pack, unpack, unwords)
 import Data.Time.Clock (getCurrentTime)
 import Network.HTTP.Client (HttpException (HttpExceptionRequest), HttpExceptionContent (ConnectionFailure, StatusCodeException))
 import qualified Network.IRC.Conduit as IRC
@@ -64,79 +64,71 @@ withCurrentBotConfig nick configMVar handler = do
 
 reporterThread :: MVar BrockmanConfig -> Nick -> IO ()
 reporterThread configMVar nick = do
-  config@BrockmanConfig {configChannel, configShortener, configDefaultDelay, configShowEntryDate} <- readMVar configMVar
-  withIrcConnection config listen $ \chan -> do
-    withCurrentBotConfig nick configMVar $ \initialBotConfig -> do
+  config@BrockmanConfig {configChannel, configDefaultDelay} <- readMVar configMVar
+  withIrcConnection config listen $ \chan ->
+    withCurrentBotConfig nick configMVar $ \BotConfig {botExtraChannels} -> do
       tickRef <- liftIO $ newIORef (fromMaybe defaultTick configDefaultDelay)
-      handshake nick $ Set.insert configChannel (fromMaybe Set.empty (botExtraChannels initialBotConfig))
+      void $ liftIO $ forkIO $ feedThread nick tickRef configMVar True Nothing chan
+      let initialChannels = Set.insert configChannel (fromMaybe Set.empty botExtraChannels)
+      handshake nick initialChannels
       deafen nick
-      _ <- liftIO $ forkIO $ feedThread nick tickRef configMVar True Nothing chan
-      forever $
-        withCurrentBotConfig nick configMVar $ \_ -> do
-          currentConfig <- liftIO (readMVar configMVar)
-          let channels = botChannels nick currentConfig
-          command <- liftIO (readChan chan)
-          debug nick $ show command
-          case command of
-            Pinged serverName -> do
-              debug nick ("pong " <> show serverName)
-              yield $ IRC.Pong serverName
-            NewFeedItem item -> do
-              item' <- liftIO $ maybe (pure item) (\url -> item `shortenWith` T.unpack url) configShortener
-              let displayItem = display (fromMaybe False configShowEntryDate)
-              debug nick ("sending " <> show (displayItem item'))
-              if fromMaybe False (configNoPrivmsg config)
-                then broadcastNotice channels $ displayItem item'
-                else broadcast channels [displayItem item']
-            Exception message ->
-              broadcastNotice channels message
-            Messaged user message ->
-              debug nick ("got a message from " <> show user <> ": " <> show message)
-            Subscribe user -> do
-              liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ insert user
-              notice nick $ show user <> " has subscribed"
-              broadcast (Set.singleton user) ["subscribed to " <> T.pack (show nick)]
-            Unsubscribe user -> do
-              liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ delete user
-              notice nick $ show user <> " has unsubscribed"
-              broadcast (Set.singleton user) ["unsubscribed from " <> T.pack (show nick)]
-            InfoRequested channel -> do
-              theTick <- liftIO $ readIORef tickRef
-              broadcast (Set.singleton channel) $
-                pure $
-                  case view (configBotsL . at nick) currentConfig of
-                    Just BotConfig {botFeed, botExtraChannels, botDelay} -> do
-                      T.unwords $
-                        [ "I serve the feed <" <> botFeed <> ">",
-                          "to " <> T.intercalate ", " (map (decodeUtf8 . encode) (toList $ Set.insert configChannel $ fromMaybe Set.empty botExtraChannels)) <> ".",
-                          "Refresh rate: " <> T.pack (show theTick) <> "s"
-                        ]
-                          ++ maybeToList (("configured " <>) . (<> "s") . T.pack . show <$> botDelay)
-                    _ -> "huh?"
-            Tick channel tick -> do
-              liftIO $ update configMVar $ configBotsL . at nick . mapped . botDelayL .~ tick
-              notice nick ("change tick speed to " <> show tick)
-              channelsForNick <- botChannels nick <$> liftIO (readMVar configMVar)
-              broadcastNotice (Set.insert channel channelsForNick) $ T.pack (show nick) <> " @ " <> T.pack (maybe "auto" ((<> " seconds") . show) tick)
-            SetUrl channel url -> do
-              liftIO $ update configMVar $ configBotsL . at nick . mapped . botFeedL .~ url
-              notice nick $ "set url to " <> T.unpack url
-              channelsForNick <- botChannels nick <$> liftIO (readMVar configMVar)
-              broadcastNotice (Set.insert channel channelsForNick) $ T.pack (show nick) <> " -> " <> url
-            Killed -> do
-              liftIO $ update configMVar $ configBotsL . at nick .~ Nothing
-              notice nick "killed"
-            Kicked channel -> do
-              liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ delete channel
-              notice nick $ "kicked from " <> show channel
-            Invited channel -> do
-              liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ insert channel
-              notice nick $ "invited to " <> show channel
-              yield $ IRC.Join $ encode channel
-            MOTD -> do
-              notice nick ("handshake, joining " <> show channels)
-              mapM_ (yield . IRC.Join . encode) channels
+      forever $ react tickRef config chan
   where
+    react tickRef (BrockmanConfig{configShowEntryDate, configChannel, configShortener, configNoPrivmsg}) chan =
+      withCurrentBotConfig nick configMVar $ \BotConfig {botFeed, botDelay, botExtraChannels} -> do
+        let currentChannels = Set.insert configChannel (fromMaybe Set.empty botExtraChannels)
+        command <- liftIO (readChan chan)
+        debug nick $ show command
+        case command of
+          Pinged serverName -> do
+            yield $ IRC.Pong serverName
+          NewFeedItem item -> do
+            item' <- liftIO $ maybe (pure item) (\url -> item `shortenWith` T.unpack url) configShortener
+            let message = display (fromMaybe False configShowEntryDate) item'
+            if fromMaybe False configNoPrivmsg
+              then broadcastNotice currentChannels message
+              else broadcast currentChannels [message]
+          Exception message -> broadcastNotice currentChannels message
+          Messaged _ _ -> return ()
+          Subscribe user -> do
+            liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ insert user
+            notice nick $ show user <> " has subscribed"
+            broadcast (Set.singleton user) ["subscribed to " <> T.pack (show nick)]
+          Unsubscribe user -> do
+            liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ delete user
+            notice nick $ show user <> " has unsubscribed"
+            broadcast (Set.singleton user) ["unsubscribed from " <> T.pack (show nick)]
+          InfoRequested channel -> do
+            theTick <- liftIO $ readIORef tickRef
+            broadcast (Set.singleton channel) $
+              pure $
+                T.unwords $
+                  [ "I serve the feed <" <> botFeed <> ">",
+                    "to " <> T.intercalate ", " (map (decodeUtf8 . encode) (toList currentChannels)) <> ".",
+                    "Refresh rate: " <> T.pack (show theTick) <> "s"
+                  ]
+                    ++ maybeToList (("configured " <>) . (<> "s") . T.pack . show <$> botDelay)
+          Tick channel tick -> do
+            liftIO $ update configMVar $ configBotsL . at nick . mapped . botDelayL .~ tick
+            notice nick $ T.unpack (decodeUtf8 (encode channel)) <> " changed tick speed to " <> show tick
+            broadcastNotice (Set.insert channel currentChannels) $ T.pack (show nick) <> " @ " <> T.pack (maybe "auto" ((<> " seconds") . show) tick) <> " (changed by " <> decodeUtf8 (encode channel) <> ")"
+          SetUrl channel url -> do
+            liftIO $ update configMVar $ configBotsL . at nick . mapped . botFeedL .~ url
+            notice nick $ T.unpack (decodeUtf8 (encode channel)) <> " set url to " <> T.unpack url
+            broadcastNotice (Set.insert channel currentChannels) $ T.pack (show nick) <> " -> " <> url <> " (changed by " <> decodeUtf8 (encode channel) <> ")"
+          Killed -> do
+            liftIO $ update configMVar $ configBotsL . at nick .~ Nothing
+            notice nick "killed"
+          Kicked channel -> do
+            liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ delete channel
+            notice nick $ "kicked from " <> show channel
+          Invited channel -> do
+            liftIO $ update configMVar $ configBotsL . at nick . mapped . botExtraChannelsL %~ insert channel
+            notice nick $ "invited to " <> show channel
+            yield $ IRC.Join $ encode channel
+          MOTD -> do
+            notice nick ("handshake, joining " <> show currentChannels)
+            mapM_ (yield . IRC.Join . encode) currentChannels
     listen chan =
       forever $
         await >>= \case
@@ -167,14 +159,12 @@ getFeed url =
       return (Left "Timeout")
     Just (Left exception) ->
       let mircRed text = "\ETX4,99" <> text <> "\ETX" -- ref https://www.mirc.com/colors.html
-          message = mircRed $
-            T.unwords $
-              T.words $ case exception of
-                HttpExceptionRequest _ (StatusCodeException response _) ->
-                  T.unwords [T.pack $ show $ response ^. responseStatus . statusCode, decodeUtf8 $ response ^. responseStatus . statusMessage]
-                HttpExceptionRequest _ (ConnectionFailure _) -> "Connection failure"
-                HttpExceptionRequest _ exceptionContent -> T.pack $ show exceptionContent
-                _ -> T.pack $ show exception
+          message = mircRed $ case exception of
+            HttpExceptionRequest _ (StatusCodeException response _) ->
+              T.unwords [T.pack $ show $ response ^. responseStatus . statusCode, decodeUtf8 $ response ^. responseStatus . statusMessage]
+            HttpExceptionRequest _ (ConnectionFailure _) -> "Connection failure"
+            HttpExceptionRequest _ exceptionContent -> T.pack $ show exceptionContent
+            _ -> T.pack $ show exception
        in return $ Left message
     Just (Right response) -> do
       now <- liftIO getCurrentTime
