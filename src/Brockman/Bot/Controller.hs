@@ -42,30 +42,33 @@ controllerThread configMVar = do
     Nothing -> pure ()
     Just initialControllerConfig@ControllerConfig {controllerNick} ->
       let initialControllerChannels = Set.insert (configChannel initialConfig) $ fromMaybe Set.empty (controllerExtraChannels initialControllerConfig)
+          handleMessage :: Either Channel Nick -> ByteString -> Maybe ControllerCommand
+          handleMessage target message =
+            let toChannel = either id (decode . encode)
+             in case bsWords message of
+                  ["help"] -> Just $ Help $ toChannel target
+                  ["dump"] -> Just $ Dump $ toChannel target
+                  ["add", decode -> nick, decodeUtf8 -> url]
+                    | "http" `T.isPrefixOf` url && isValidIrcNick nick ->
+                        Just $ Add nick url $ case target of
+                          Left channel
+                            | channel == configChannel initialConfig -> Nothing
+                            | otherwise -> Just channel
+                          Right _ -> Nothing
+                  _ -> Nothing
+
           listen chan =
             forever $
               await >>= \case
                 Just (Right (IRC.Event _ _ (IRC.Invite channel _))) -> liftIO $ writeChan chan $ Invite $ decode channel
                 Just (Right (IRC.Event _ _ (IRC.Kick channel nick _))) | decode nick == controllerNick -> liftIO $ writeChan chan $ Kick $ decode channel
                 Just (Right (IRC.Event _ _ (IRC.Ping s _))) -> liftIO $ writeChan chan (Pinged s)
-                Just (Right (IRC.Event _ (IRC.User user) (IRC.Privmsg _ (Right message)))) ->
-                  liftIO $ case bsWords message of
-                    ["help"] -> writeChan chan $ Help $ decode user
-                    ["dump"] -> writeChan chan $ Dump $ decode user
-                    _ -> pure ()
-                Just (Right (IRC.Event _ (IRC.Channel channel _) (IRC.Privmsg _ (Right message)))) ->
-                  liftIO $ case bsWords <$> B.stripPrefix (encode controllerNick <> ":") message of
-                    Just ["dump"] -> writeChan chan $ Dump $ decode channel
-                    Just ["help"] -> writeChan chan $ Help $ decode channel
-                    Just ["add", decode -> nick, decodeUtf8 -> url]
-                      | "http" `T.isPrefixOf` url && isValidIrcNick nick ->
-                          writeChan chan $
-                            Add nick url $
-                              if decode channel == configChannel initialConfig then Nothing else Just $ decode channel
-                    Just _ -> writeChan chan $ Help $ decode channel
-                    _ -> pure ()
-                -- 376 is RPL_ENDOFMOTD
+                Just (Right (IRC.Event _ (IRC.User (decode -> user)) (IRC.Privmsg _ (Right message)))) ->
+                  liftIO $ maybe (pure ()) (writeChan chan) $ handleMessage (Right user) message
+                Just (Right (IRC.Event _ (IRC.Channel (decode -> channel) _) (IRC.Privmsg _ (Right message)))) ->
+                  liftIO $ maybe (pure ()) (writeChan chan) $ handleMessage (Left channel) =<< B.stripPrefix (encode controllerNick <> ":") message
                 Just (Right (IRC.Event _ _ (IRC.Numeric 376 _))) ->
+                  -- 376 is RPL_ENDOFMOTD
                   liftIO $ writeChan chan MOTD
                 _ -> pure ()
           speak chan = do
