@@ -5,7 +5,7 @@
 module Brockman.Feed where
 
 import Control.Applicative (Alternative (..))
-import qualified Data.Cache.LRU as LRU
+import Data.Cache.LRU qualified as LRU
 import Data.Fixed
 import Data.Hashable (hash)
 import Data.List
@@ -16,13 +16,13 @@ import Data.Time.LocalTime (zonedTimeToUTC)
 import Data.Time.RFC3339 (parseTimeRFC3339)
 import Data.Time.RFC822 (parseTimeRFC822)
 import Text.Atom.Feed (Entry (entryUpdated))
-import qualified Text.Atom.Feed as Atom
+import Text.Atom.Feed qualified as Atom
 import Text.Feed.Query (feedItems)
-import qualified Text.Feed.Types as Feed (Feed (..), Item (..))
+import Text.Feed.Types qualified as Feed (Feed (..), Item (..))
 import Text.HTMLEntity (decode')
 import Text.RSS.Syntax (RSSItem (rssItemPubDate))
-import qualified Text.RSS.Syntax as RSS
-import qualified Text.RSS1.Syntax as RSS1
+import Text.RSS.Syntax qualified as RSS
+import Text.RSS1.Syntax qualified as RSS1
 
 type LRU = LRU.LRU Int ()
 
@@ -56,7 +56,9 @@ feedEntryUtc item =
     parseTime x = parseTimeRFC822 x <|> parseTimeRFC3339 x
 
 averageDelta :: [UTCTime] -> Maybe Integer
-averageDelta times = fmap (`div` pico) $ mean $ map (unFixed . nominalDiffTimeToSeconds) $ zipWith diffUTCTime times' (tail times')
+averageDelta times = case times' of
+  [] -> Nothing
+  _ : timesRest -> fmap (`div` pico) $ mean $ map (unFixed . nominalDiffTimeToSeconds) $ zipWith diffUTCTime times' timesRest
   where
     pico = (^) @Integer @Integer 10 12
     times' = take 10 $ reverse $ nubBy sameMinute $ sort times
