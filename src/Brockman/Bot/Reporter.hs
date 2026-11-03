@@ -28,9 +28,10 @@ import qualified Data.Set as Set
 import qualified Data.Text as T (Text, intercalate, pack, unpack, unwords)
 import Data.Time.Clock (getCurrentTime)
 import Network.HTTP.Client (HttpException (HttpExceptionRequest), HttpExceptionContent (ConnectionFailure, StatusCodeException))
+import Network.HTTP.Client.TLS (getGlobalManager)
 import qualified Network.IRC.Conduit as IRC
 import Network.Socket (HostName)
-import Network.Wreq (FormParam ((:=)), defaults, getWith, header, postWith, responseBody, responseStatus, statusCode, statusMessage)
+import Network.Wreq (FormParam ((:=)), defaults, getWith, header, manager, postWith, responseBody, responseStatus, statusCode, statusMessage)
 import Safe (readMay)
 import System.Log.Logger
 import System.Random (randomRIO)
@@ -68,7 +69,7 @@ reporterThread configMVar nick = do
   withIrcConnection config listen $ \chan ->
     withCurrentBotConfig nick configMVar $ \BotConfig {botExtraChannels} -> do
       tickRef <- liftIO $ newIORef (fromMaybe defaultTick configDefaultDelay)
-      void $ liftIO $ forkIO $ feedThread nick tickRef configMVar True Nothing chan
+      void $ liftIO $ forkIO $ feedThread nick tickRef configMVar True Nothing (writeChan chan)
       let initialChannels = Set.insert configChannel (fromMaybe Set.empty botExtraChannels)
       handshake nick initialChannels
       deafen nick
@@ -152,8 +153,30 @@ reporterThread configMVar nick = do
               _ -> Messaged user (decodeUtf8 message)
           _ -> pure ()
 
+-- a reporter without its own IRC connection: items go out through the controller's connection
+relayReporter :: MVar BrockmanConfig -> ([IRC.IrcMessage] -> IO ()) -> Nick -> IO ()
+relayReporter configMVar send nick = do
+  BrockmanConfig {configDefaultDelay} <- readMVar configMVar
+  tickRef <- newIORef (fromMaybe defaultTick configDefaultDelay)
+  feedThread nick tickRef configMVar True Nothing $ \message ->
+    -- a removed bot stops here instead of posting its last items
+    withCurrentBotConfig nick configMVar $ \_ -> do
+      config@BrockmanConfig {configShowEntryDate, configShortener, configNoPrivmsg} <- readMVar configMVar
+      let suffix = fromMaybe "" (configRelaySuffix config)
+          channels = botChannels nick config
+      case message of
+        NewFeedItem item -> do
+          item' <- maybe (pure item) (\url -> item `shortenWith` T.unpack url) configShortener
+          let text = display (fromMaybe False configShowEntryDate) item'
+          send $ (if fromMaybe False configNoPrivmsg then relayNotice else relay) suffix nick channels text
+        Exception text -> send $ relayNotice suffix nick channels text
+        _ -> pure ()
+
 getFeed :: URL -> IO (Either T.Text (Integer, [FeedItem]))
-getFeed url =
+getFeed url = do
+  -- one shared connection manager: wreq's default builds a new one (and loads the CA store) per request
+  httpManager <- getGlobalManager
+  let options = defaults & manager .~ Right httpManager & header "Accept" .~ ["application/atom+xml", "application/rss+xml", "*/*"]
   timeout (100 * second) (E.try (getWith options (T.unpack url))) >>= \case
     Nothing ->
       return (Left "Timeout")
@@ -175,11 +198,10 @@ getFeed url =
         then Left "Feed is empty"
         else Right (fromMaybe defaultTick delta, feedItems)
   where
-    options = defaults & header "Accept" .~ ["application/atom+xml", "application/rss+xml", "*/*"]
     second = 10 ^ (6 :: Int)
 
-feedThread :: Nick -> IORef Integer -> MVar BrockmanConfig -> Bool -> Maybe LRU -> Chan ReporterMessage -> IO ()
-feedThread nick tickRef configMVar isFirstTime lru chan =
+feedThread :: Nick -> IORef Integer -> MVar BrockmanConfig -> Bool -> Maybe LRU -> (ReporterMessage -> IO ()) -> IO ()
+feedThread nick tickRef configMVar isFirstTime lru emit =
   withCurrentBotConfig nick configMVar $ \BotConfig {botDelay, botFeed} -> do
     maxStartDelay <- configMaxStartDelay <$> readMVar configMVar
     notifyErrors <- configNotifyErrors <$> readMVar configMVar
@@ -193,7 +215,7 @@ feedThread nick tickRef configMVar isFirstTime lru chan =
     (newTick, newLRU) <- case feedResult of
       Left message -> do
         error' nick $ "exception: " <> T.unpack message
-        when (fromMaybe True notifyErrors) $ writeChan chan $ Exception $ message <> " — " <> botFeed
+        when (fromMaybe True notifyErrors) $ emit $ Exception $ message <> " — " <> botFeed
         oldTick <- readIORef tickRef
         debug nick $ "exponential backoff: " <> show oldTick
         return
@@ -203,14 +225,14 @@ feedThread nick tickRef configMVar isFirstTime lru chan =
       Right (newTick, feedItems) -> do
         debug nick $ "got new tick: " <> show newTick
         let (lru', items) = deduplicate lru feedItems
-        unless isFirstTime $ writeList2Chan chan $ map NewFeedItem items
+        unless isFirstTime $ mapM_ (emit . NewFeedItem) items
         return (newTick, Just lru')
     tick <- scatterTick $ max 1 $ min 86400 $ fromMaybe newTick botDelay
     writeIORef tickRef tick
     debug nick $ "lrusize: " <> show (maybe 0 (fromMaybe 0 . LRU.maxSize) newLRU)
     notice nick $ "tick " <> show tick <> " seconds"
     liftIO $ sleepSeconds tick
-    feedThread nick tickRef configMVar False newLRU chan
+    feedThread nick tickRef configMVar False newLRU emit
   where
     scatterTick x = (+) (x `div` 2) <$> randomRIO (0, x `div` 2)
 

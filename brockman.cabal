@@ -25,6 +25,7 @@ executable brockman
     hslogger,
     html-entity,
     http-client,
+    http-client-tls,
     irc-conduit,
     lens,
     lrucache,
