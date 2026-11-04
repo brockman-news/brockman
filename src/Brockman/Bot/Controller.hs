@@ -7,7 +7,7 @@
 module Brockman.Bot.Controller where
 
 import Brockman.Bot
-import Brockman.Bot.Reporter (relayReporter, reporterThread)
+import Brockman.Bot.Reporter (newFetchLimits, relayReporter, reporterThread)
 import Brockman.Types
 import Brockman.Util
 import Control.Concurrent (forkIO, killThread)
@@ -59,9 +59,10 @@ controllerThread configMVar = do
   let relaySuffix = configRelaySuffix initialConfig
   -- relayed items wait here while the controller is (re)connecting
   relayChan <- newChan
+  limits <- newFetchLimits $ fromMaybe 64 $ configFetchConcurrency initialConfig
   let startBot nick = void $ forkIO $ eloop $ case relaySuffix of
-        Just _ -> relayReporter configMVar (writeChan relayChan) nick
-        Nothing -> reporterThread configMVar nick
+        Just _ -> relayReporter limits configMVar (writeChan relayChan) nick
+        Nothing -> reporterThread limits configMVar nick
   when (isJust relaySuffix && isNothing (configController initialConfig)) $
     fail "relaySuffix needs a controller: it is the only connection relayed items can go out on"
   mapM_ startBot $ M.keys $ configBots initialConfig

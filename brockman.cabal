@@ -19,7 +19,6 @@ executable brockman
     conduit,
     containers,
     directory,
-    feed,
     filepath,
     hashable,
     hslogger,
@@ -37,7 +36,10 @@ executable brockman
     time,
     timerep,
     unordered-containers,
-    wreq
+    wreq,
+    xeno
   default-language: Haskell2010
   extensions: Strict, ImportQualifiedPost
-  ghc-options: -O2 -Wall -Werror -threaded
+  -- one mostly sleeping thread per feed: 4 KB stack chunks (default 32 KB) halve memory at 40k feeds (3.1 -> 1.45 GB);
+  -- fetching is CPU-bound on brockman.news (aarch64, TLS + parsing): 4 cores do 41k first fetches in ~7 instead of ~80 minutes
+  ghc-options: -O2 -Wall -Werror -threaded "-with-rtsopts=-kc4k -N4"

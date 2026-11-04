@@ -122,7 +122,8 @@ mergeBrockmanConfig a b =
       configMaxStartDelay = configMaxStartDelay a <|> configMaxStartDelay b,
       configNotifyErrors = configNotifyErrors a <|> configNotifyErrors b,
       configShowEntryDate = configShowEntryDate a <|> configShowEntryDate b,
-      configRelaySuffix = configRelaySuffix a <|> configRelaySuffix b
+      configRelaySuffix = configRelaySuffix a <|> configRelaySuffix b,
+      configFetchConcurrency = configFetchConcurrency a <|> configFetchConcurrency b
     }
 
 data BrockmanConfig = BrockmanConfig
@@ -140,7 +141,9 @@ data BrockmanConfig = BrockmanConfig
     configShowEntryDate :: Maybe Bool,
     -- when set, reporters open no IRC connection of their own: the controller relays their items
     -- with RELAYMSG as NICK<suffix>, so the suffix must contain one of ergo's relaymsg separators
-    configRelaySuffix :: Maybe Text
+    configRelaySuffix :: Maybe Text,
+    -- feeds fetched at the same time; each fetch holds its whole body and parse tree in memory
+    configFetchConcurrency :: Maybe Int
   }
   deriving (Data, Generic, Show, Typeable)
 
