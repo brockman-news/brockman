@@ -92,7 +92,8 @@ mergeIrcConfig a b =
   IrcConfig
     { ircHost = ircHost b,
       ircPort = ircPort a <|> ircPort b,
-      ircTls = ircTls a <|> ircTls b
+      ircTls = ircTls a <|> ircTls b,
+      ircOper = ircOper a <|> ircOper b
     }
 
 mergeControllerConfig :: Maybe ControllerConfig -> Maybe ControllerConfig -> Maybe ControllerConfig
@@ -120,7 +121,9 @@ mergeBrockmanConfig a b =
       configDefaultDelay = configDefaultDelay a <|> configDefaultDelay b,
       configMaxStartDelay = configMaxStartDelay a <|> configMaxStartDelay b,
       configNotifyErrors = configNotifyErrors a <|> configNotifyErrors b,
-      configShowEntryDate = configShowEntryDate a <|> configShowEntryDate b
+      configShowEntryDate = configShowEntryDate a <|> configShowEntryDate b,
+      configRelaySuffix = configRelaySuffix a <|> configRelaySuffix b,
+      configFetchConcurrency = configFetchConcurrency a <|> configFetchConcurrency b
     }
 
 data BrockmanConfig = BrockmanConfig
@@ -135,7 +138,12 @@ data BrockmanConfig = BrockmanConfig
     configMaxStartDelay :: Maybe Integer,
     configNotifyErrors :: Maybe Bool,
     configNoPrivmsg :: Maybe Bool,
-    configShowEntryDate :: Maybe Bool
+    configShowEntryDate :: Maybe Bool,
+    -- when set, reporters open no IRC connection of their own: the controller relays their items
+    -- with RELAYMSG as NICK<suffix>, so the suffix must contain one of ergo's relaymsg separators
+    configRelaySuffix :: Maybe Text,
+    -- feeds fetched at the same time; each fetch holds its whole body and parse tree in memory
+    configFetchConcurrency :: Maybe Int
   }
   deriving (Data, Generic, Show, Typeable)
 
@@ -148,7 +156,15 @@ data ControllerConfig = ControllerConfig
 data IrcConfig = IrcConfig
   { ircHost :: URL,
     ircPort :: Maybe Int,
-    ircTls :: Maybe Bool
+    ircTls :: Maybe Bool,
+    ircOper :: Maybe OperConfig
+  }
+  deriving (Data, Generic, Show, Typeable)
+
+-- relaying needs the relaymsg oper capability (and nofakelag to keep up with thousands of feeds)
+data OperConfig = OperConfig
+  { operName :: Text,
+    operPasswordFile :: FilePath
   }
   deriving (Data, Generic, Show, Typeable)
 
@@ -213,6 +229,9 @@ instance FromJSON IrcConfig where
 instance FromJSON ControllerConfig where
   parseJSON = parseStrictJSON
 
+instance FromJSON OperConfig where
+  parseJSON = parseStrictJSON
+
 instance ToJSON BrockmanConfig where
   toJSON = genericToJSON myOptions
 
@@ -223,4 +242,7 @@ instance ToJSON IrcConfig where
   toJSON = genericToJSON myOptions
 
 instance ToJSON ControllerConfig where
+  toJSON = genericToJSON myOptions
+
+instance ToJSON OperConfig where
   toJSON = genericToJSON myOptions
